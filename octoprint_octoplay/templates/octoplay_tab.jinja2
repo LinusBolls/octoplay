@@ -1,0 +1,53 @@
+<div style="display: flex; flex-direction: column">
+  <span
+    class="btn btn-primary fileinput-button span6"
+    style="margin-bottom: 10px"
+  >
+    <i class="fas fa-upload"></i>
+    <span class="hidden-tablet UICHideTablet">Upload MIDI</span>
+    <input
+      data-octoplay="midi-file-input"
+      accept=".mid"
+      type="file"
+      class="fileinput-button"
+    />
+  </span>
+
+  <div id="trackInfo" style="display: flex; flex-direction: column">
+    <label class="checkbox">
+      <input type="checkbox" id="trackButton0" value="0" />
+      <span>Track 1: kalimba - 6 notes</span>
+    </label>
+    <label>
+      Speed multiplier:
+      <input
+        id="speedMultiplierInput"
+        type="number"
+        step="0.01"
+        min="0.01"
+        value="1"
+      />
+    </label>
+  </div>
+  <div style="display: flex">
+    <button class="btn span4" type="button" id="previewStart">
+      Play/Pause Preview
+    </button>
+    <button class="btn span4" type="button" id="previewStop">
+      Stop Preview
+    </button>
+    <button class="btn span4" data-octoplay="play">Play</button>
+    <button class="btn span4" data-octoplay="pauseUnpause">Pause/Unpause</button>
+    </div>
+</div>
+<div>
+  <br />
+  <label class="checkbox">
+    <input type="checkbox" id="g4toggle" />
+    <span>Add G4 after M300 (required for Duet)</span>
+  </label>
+  <br />
+  <div id="runDuration">N/A</div>
+</div>
+<br />
+<textarea id="outputArea" rows="10" cols="100" style="width: 100%; resize: vertical"></textarea>
