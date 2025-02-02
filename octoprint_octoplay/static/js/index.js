@@ -33788,6 +33788,7 @@ function OctoplayTab() {
   useInterval(() => {
     if (gcodeCommand.current) {
       gcodeCommand.current.tick();
+      setPlayback({ playing: gcodeCommand.current.state === "PLAYING" });
     }
   }, 100);
   import_react2.useEffect(() => {
