@@ -75,3 +75,23 @@ export function getHumanReadableDuration(durationMs: number): string {
 
   return parts.join(" ") || "0s";
 }
+
+export function formatFileSize(bytes: number, decimals: number = 1): string {
+  if (bytes === 0) return "0B";
+
+  const sizes = ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  const fileSize = bytes / Math.pow(1024, i);
+
+  return `${parseFloat(fileSize.toFixed(decimals))}${sizes[i]}`;
+}
+
+export function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000) % 60;
+  const minutes = Math.floor(ms / (1000 * 60)) % 60;
+  const hours = Math.floor(ms / (1000 * 60 * 60));
+
+  const pad = (num: number) => num.toString().padStart(2, "0");
+
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+}

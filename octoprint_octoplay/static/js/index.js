@@ -17394,6 +17394,14 @@ function getHumanReadableDuration(durationMs) {
     parts.push(`${seconds}s`);
   return parts.join(" ") || "0s";
 }
+function formatFileSize(bytes, decimals = 1) {
+  if (bytes === 0)
+    return "0B";
+  const sizes = ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  const fileSize = bytes / Math.pow(1024, i);
+  return `${parseFloat(fileSize.toFixed(decimals))}${sizes[i]}`;
+}
 
 // src/GcodeCommand.ts
 class GcodeCommand {
@@ -17613,11 +17621,11 @@ function mountMidiFilesHtml() {
   const parent = document.querySelector('[data-octoplay="midi-files"]');
   const midiFilesHtml = midifiles.map((i) => {
     const isSelected = selectedMidiFile?.id === i.id;
-    return `<div data-octoplay-midi="${i.id}" style="display: flex; flex-direction: column; box-sizing: border-box; border: 1px solid transparent; border-radius: 2px; ${isSelected ? "border-color: red" : ""}">
+    return `<div data-octoplay-midi="${i.id}" style="display: flex; flex-direction: column; box-sizing: border-box; padding: 5px; ${isSelected ? "background: rgb(245, 245, 245)" : ""}">
       <div>${i.fileName}</div>
-      <div>${i.fileSize}</div>
-      <div>${i.midiDurationMs}ms</div>
-      <div>${i.tracks.length} tracks</div>
+      <small class="muted">${formatFileSize(i.fileSize)}</small>
+      <small class="muted">${getHumanReadableDuration(i.midiDurationMs)}</small>
+      <small class="muted">${i.tracks.length} tracks</small>
     </div>`;
   }).join("");
   parent.innerHTML = midiFilesHtml;
@@ -17672,8 +17680,8 @@ function mountUi() {
         updateUiOnMidiChange();
         updateUiOnSettingsChange();
       }
-      mountMidiFilesHtml();
       midifiles = [...midifiles, ...newMidifiles];
+      mountMidiFilesHtml();
     }
   });
   document.querySelector("#previewStart").addEventListener("click", togglePreview);

@@ -1,7 +1,7 @@
 import * as Tone from "tone";
 
 import { GcodeCommand } from "./GcodeCommand";
-import { getHumanReadableDuration } from "./util";
+import { formatFileSize, getHumanReadableDuration } from "./util";
 import { MidiFile } from "./MidiFile";
 
 let midifiles: MidiFile[] = [];
@@ -16,13 +16,13 @@ function mountMidiFilesHtml() {
 
       return `<div data-octoplay-midi="${
         i.id
-      }" style="display: flex; flex-direction: column; box-sizing: border-box; border: 1px solid transparent; border-radius: 2px; ${
-        isSelected ? "border-color: red" : ""
+      }" style="display: flex; flex-direction: column; box-sizing: border-box; padding: 5px; ${
+        isSelected ? "background: rgb(245, 245, 245)" : ""
       }">
       <div>${i.fileName}</div>
-      <div>${i.fileSize}</div>
-      <div>${i.midiDurationMs}ms</div>
-      <div>${i.tracks.length} tracks</div>
+      <small class="muted">${formatFileSize(i.fileSize)}</small>
+      <small class="muted">${getHumanReadableDuration(i.midiDurationMs)}</small>
+      <small class="muted">${i.tracks.length} tracks</small>
     </div>`;
     })
     .join("");
@@ -105,9 +105,9 @@ function mountUi() {
 
           updateUiOnSettingsChange();
         }
-        mountMidiFilesHtml();
-
         midifiles = [...midifiles, ...newMidifiles];
+
+        mountMidiFilesHtml();
       }
     });
 
