@@ -17332,9 +17332,6 @@ var Listener = getContext().listener;
 var Draw = getContext().draw;
 var context2 = getContext();
 
-// src/index.ts
-var import_midi = __toESM(require_Midi(), 1);
-
 // src/util.ts
 var getGcodeRunDurationMs = (input) => {
   if (typeof input !== "string") {
@@ -17463,7 +17460,6 @@ class GcodeCommand {
   unpause() {
     this.state = "PLAYING";
     if (this.lastPlayedChunkIndex === -1) {
-      console.log("gcodecomand playing initial chunk");
       this.playChunk(0);
     }
   }
@@ -17479,11 +17475,13 @@ class GcodeCommand {
   }
   tick() {
     if (this.shouldStartPlayingNextChunk()) {
-      console.log("gcodecomand.tick playing chunk");
       this.playChunk(this.lastPlayedChunkIndex + 1);
     }
   }
 }
+
+// src/MidiFile.ts
+var import_midi = __toESM(require_Midi(), 1);
 
 // src/getGcodeFromMidi.ts
 function getGcodeFromMidi(midi, options) {
@@ -17498,7 +17496,6 @@ function getGcodeFromMidi(midi, options) {
   };
   for (let i = 0;i < midi.tracks.length; i++) {
     if (tracks[i]?.enabled ?? false) {
-      console.log("doing track", i);
       let currTrack = midi.tracks[i].notes;
       if (midi.tracks[i].instrument.percussion) {
         currTrack.forEach((note) => {
@@ -17560,8 +17557,78 @@ function getGcodeFromMidi(midi, options) {
   };
 }
 
+// src/MidiFile.ts
+function readMidiFile(file) {
+  return new Promise((res) => {
+    const reader = new FileReader;
+    reader.onload = (e) => {
+      const result = e.target?.result;
+      if (!result || !(result instanceof ArrayBuffer)) {
+        throw new Error("Invalid file provided.");
+      }
+      const midi = new import_midi.Midi(result);
+      if (!midi) {
+        throw new Error("Invalid file provided.");
+      }
+      res(midi);
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+class MidiFile {
+  id;
+  _file;
+  _midi;
+  constructor(file, midi) {
+    this.id = Math.random().toString(36).substr(2, 9);
+    this._file = file;
+    this._midi = midi;
+  }
+  static async fromFile(file) {
+    const midi = await readMidiFile(file);
+    return new MidiFile(file, midi);
+  }
+  getGcode(options) {
+    return getGcodeFromMidi(this._midi, options);
+  }
+  get tracks() {
+    return this._midi.tracks;
+  }
+  get fileName() {
+    return this._file.name;
+  }
+  get fileSize() {
+    return this._file.size;
+  }
+  get midiDurationMs() {
+    return this._midi.duration;
+  }
+}
+
 // src/index.ts
-var midi = null;
+var midifiles = [];
+var selectedMidiFile = null;
+function mountMidiFilesHtml() {
+  const parent = document.querySelector('[data-octoplay="midi-files"]');
+  const midiFilesHtml = midifiles.map((i) => {
+    const isSelected = selectedMidiFile?.id === i.id;
+    return `<div data-octoplay-midi="${i.id}" style="display: flex; flex-direction: column; box-sizing: border-box; border: 1px solid transparent; border-radius: 2px; ${isSelected ? "border-color: red" : ""}">
+      <div>${i.fileName}</div>
+      <div>${i.fileSize}</div>
+      <div>${i.midiDurationMs}ms</div>
+      <div>${i.tracks.length} tracks</div>
+    </div>`;
+  }).join("");
+  parent.innerHTML = midiFilesHtml;
+  for (const midi of midifiles) {
+    document.querySelector(`[data-octoplay-midi="${midi.id}"]`).addEventListener("click", () => {
+      selectedMidiFile = midi;
+      updateUiOnMidiChange();
+      mountMidiFilesHtml();
+    });
+  }
+}
 var command = null;
 var synth = new Synth({
   oscillator: {
@@ -17596,28 +17663,17 @@ function tryToMountUi() {
   document.querySelector('[data-octoplay="midi-file-input"]').setAttribute("data-octoplay-mounted", "true");
 }
 function mountUi() {
-  console.log("Octoplay mounting UI");
-  document.querySelector('[data-octoplay="midi-file-input"]').addEventListener("change", (e) => {
+  document.querySelector('[data-octoplay="midi-file-input"]').addEventListener("change", async (e) => {
     const files = e.target.files;
-    const hasFiles = files && files.length > 0;
-    console.log("Octoplay file input change", files, hasFiles);
-    if (hasFiles) {
-      const file = files[0];
-      const reader = new FileReader;
-      reader.onload = (e2) => {
-        console.log("Octoplay on reader load");
-        const result = e2.target?.result;
-        if (!result || !(result instanceof ArrayBuffer)) {
-          throw new Error("Invalid file provided.");
-        }
-        midi = new import_midi.Midi(result);
-        if (!midi) {
-          throw new Error("Invalid file provided.");
-        }
-        updateUiOnMidiChange(midi);
-      };
-      reader.readAsArrayBuffer(file);
-      reader.addEventListener("loadend", updateUiOnSettingsChange);
+    if (files) {
+      const newMidifiles = await Promise.all(Array.from(files).map((i) => MidiFile.fromFile(i)));
+      if (midifiles.length === 0) {
+        selectedMidiFile = newMidifiles[0];
+        updateUiOnMidiChange();
+        updateUiOnSettingsChange();
+      }
+      mountMidiFilesHtml();
+      midifiles = [...midifiles, ...newMidifiles];
     }
   });
   document.querySelector("#previewStart").addEventListener("click", togglePreview);
@@ -17625,7 +17681,6 @@ function mountUi() {
   document.querySelector('[data-octoplay="play"]').addEventListener("click", () => {
     const gcode = document.querySelector("#outputArea").value;
     command = new GcodeCommand(gcode, null);
-    console.log("creating gcodecommand");
     command.unpause();
     setInterval(() => command.tick(), 100);
   });
@@ -17641,11 +17696,12 @@ function mountUi() {
   document.querySelector("#g4toggle").addEventListener("change", updateUiOnSettingsChange);
   document.querySelector("#speedMultiplierInput").addEventListener("change", updateUiOnSettingsChange);
 }
-function updateUiOnMidiChange(midi2) {
-  console.log("Octoplay update UI on midi change:", midi2.tracks);
+function updateUiOnMidiChange() {
+  if (!selectedMidiFile)
+    return;
   let infoDiv = document.querySelector("#trackInfo");
   infoDiv.innerHTML = "";
-  midi2.tracks.forEach((track, index) => {
+  selectedMidiFile.tracks.forEach((track, index) => {
     infoDiv.innerHTML += `<label class="checkbox"><input id="trackButton${index}" type="checkbox" value=${index} /><span>Track ${index + 1}: ${track.instrument.name} - ${track.notes.length} notes</span></label>`;
     setInterval(() => {
       document.querySelector(`#trackButton${index}`).addEventListener("change", updateUiOnSettingsChange);
@@ -17665,24 +17721,18 @@ function updateUiOnMidiChange(midi2) {
   document.querySelector("#trackButton0").checked = true;
 }
 function updateUiOnSettingsChange() {
-  if (!midi)
+  if (!selectedMidiFile)
     return;
   const speed = parseFloat(document.querySelector("#speedMultiplierInput").value);
   const useG4 = document.querySelector("#g4toggle").checked;
-  const tracks = midi.tracks.map((_, idx) => ({
+  const tracks = selectedMidiFile.tracks.map((_, idx) => ({
     enabled: document.querySelector(`#trackButton${idx}`).checked
   }));
-  console.log("Octoplay update UI on settings change:", midi, {
+  const data = selectedMidiFile.getGcode({
     speed,
     useG4,
     tracks
   });
-  const data = getGcodeFromMidi(midi, {
-    speed,
-    useG4,
-    tracks
-  });
-  console.log("Octoplay update UI on settings change:", data);
   document.querySelector("#outputArea").value = data.gcode;
   document.querySelector("#runDuration").innerHTML = getHumanReadableDuration(data.durationMs);
   for (const note of data.schedule) {

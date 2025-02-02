@@ -8,19 +8,18 @@ type ScheduleItem = {
   duration: number;
 };
 
+export type GcodeToMidiOptions = {
+  useG4?: boolean;
+  speed?: number;
+  tracks?: { enabled: boolean }[];
+};
+
 /**
  * @param options.useG4 - Whether to use G4 pauses between notes (default: false). useful for Duet firmware.
  * @param options.speed - Speed multiplier for the MIDI (default: 1).
  * @param options.tracks - Array of objects with an enabled boolean property for each track in the MIDI. If a track is disabled, it will be ignored. If the tracks option is not provided, only the first track will be used.
  */
-export function getGcodeFromMidi(
-  midi: Midi,
-  options?: {
-    useG4?: boolean;
-    speed?: number;
-    tracks?: { enabled: boolean }[];
-  }
-) {
+export function getGcodeFromMidi(midi: Midi, options?: GcodeToMidiOptions) {
   if (!midi) {
     throw new Error("No MIDI provided.");
   }
@@ -38,7 +37,6 @@ export function getGcodeFromMidi(
   // Merge note arrays from selected tracks
   for (let i = 0; i < midi.tracks.length; i++) {
     if (tracks[i]?.enabled ?? false) {
-      console.log("doing track", i);
       let currTrack = midi.tracks[i].notes;
 
       // If percussion, add a percussion flag to note

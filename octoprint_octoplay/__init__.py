@@ -7,12 +7,18 @@ __copyright__ = "Copyright (C) 2020 The OctoPrint Project - Released under terms
 from flask_babel import gettext
 
 import octoprint.plugin
+from octoprint.events import Events
 
 class OctoplayPlugin(
     octoprint.plugin.AssetPlugin,
     octoprint.plugin.TemplatePlugin,
     octoprint.plugin.SettingsPlugin,
+    octoprint.plugin.EventHandlerPlugin,
 ):
+    def on_event(self, event):
+        if event == Events.PRINT_DONE or event == Events.PRINT_CANCELLED:
+            print("moin")
+            
     def get_assets(self):
         js = [
             "js/index.js",

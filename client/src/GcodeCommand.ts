@@ -85,7 +85,6 @@ export class GcodeCommand {
     this.state = "PLAYING";
 
     if (this.lastPlayedChunkIndex === -1) {
-      console.log("gcodecomand playing initial chunk");
       this.playChunk(0);
     }
   }
@@ -106,8 +105,6 @@ export class GcodeCommand {
 
   public tick() {
     if (this.shouldStartPlayingNextChunk()) {
-      console.log("gcodecomand.tick playing chunk");
-
       this.playChunk(this.lastPlayedChunkIndex + 1);
     }
   }
