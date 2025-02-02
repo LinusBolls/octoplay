@@ -185,7 +185,11 @@ export function OctoplayTab() {
           skipPreviewToStart={skipPreviewToStart}
           playbackOptions={playbackOptions}
           onPlaybackOptionsChange={setPlaybackOptions}
-          playback={playback}
+          playback={{
+            ...playback,
+            chunkIntervalMs: gcodeChunkMs,
+            chunked: gcodeChunkMs != null,
+          }}
           togglePlayback={togglePlayback}
           skipPlaybackToStart={skipPlaybackToStart}
         />
@@ -211,7 +215,11 @@ export function TrackControls({
   preview: { playing: boolean };
   togglePreview: () => void;
   skipPreviewToStart: () => void;
-  playback: { playing: boolean };
+  playback: {
+    playing: boolean;
+    chunkIntervalMs: number | null;
+    chunked: boolean;
+  };
   togglePlayback: () => void;
   skipPlaybackToStart: () => void;
 }) {
@@ -271,7 +279,11 @@ export function TrackControls({
           <i className="fas fa-step-backward"></i>
           <span>Restart Preview</span>
         </button>
-        <button className="btn span4" onClick={togglePlayback}>
+        <button
+          className="btn span4"
+          onClick={togglePlayback}
+          disabled={playback.playing && !playback.chunked}
+        >
           <i
             className={"fas " + (playback.playing ? "fa-pause" : "fa-play")}
           ></i>

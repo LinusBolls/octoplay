@@ -93,8 +93,6 @@ export class GcodeCommand {
     if (this.state !== "PLAYING" || this.currentChunkStartedAt == null)
       return false;
 
-    if (this.lastPlayedChunkIndex >= this.chunks.length - 1) return false;
-
     const elapsedTime = Date.now() - this.currentChunkStartedAt;
     const currentChunkDuration = getGcodeRunDurationMs(
       this.chunks[this.lastPlayedChunkIndex].join("\n")

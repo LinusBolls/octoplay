@@ -33653,8 +33653,6 @@ class GcodeCommand {
   shouldStartPlayingNextChunk() {
     if (this.state !== "PLAYING" || this.currentChunkStartedAt == null)
       return false;
-    if (this.lastPlayedChunkIndex >= this.chunks.length - 1)
-      return false;
     const elapsedTime = Date.now() - this.currentChunkStartedAt;
     const currentChunkDuration = getGcodeRunDurationMs(this.chunks[this.lastPlayedChunkIndex].join(`
 `));
@@ -33848,7 +33846,11 @@ function OctoplayTab() {
         skipPreviewToStart,
         playbackOptions,
         onPlaybackOptionsChange: setPlaybackOptions,
-        playback,
+        playback: {
+          ...playback,
+          chunkIntervalMs: gcodeChunkMs,
+          chunked: gcodeChunkMs != null
+        },
         togglePlayback,
         skipPlaybackToStart
       }, undefined, false, undefined, this)
@@ -33952,6 +33954,7 @@ function TrackControls({
           /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
             className: "btn span4",
             onClick: togglePlayback,
+            disabled: playback.playing && !playback.chunked,
             children: [
               /* @__PURE__ */ jsx_dev_runtime.jsxDEV("i", {
                 className: "fas " + (playback.playing ? "fa-pause" : "fa-play")
