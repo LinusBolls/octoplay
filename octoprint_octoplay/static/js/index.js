@@ -33437,7 +33437,7 @@ var noteToFreq = (note) => {
 };
 function getHumanReadableDuration(durationMs) {
   if (durationMs < 1000)
-    return `${(durationMs / 1000).toFixed(1)}s`;
+    return `${(durationMs / 1000).toFixed(0)}s`;
   const seconds = Math.floor(durationMs / 1000) % 60;
   const minutes = Math.floor(durationMs / (1000 * 60)) % 60;
   const hours = Math.floor(durationMs / (1000 * 60 * 60));
@@ -33578,7 +33578,7 @@ class MidiFile {
     return this._file.size;
   }
   get midiDurationMs() {
-    return this._midi.duration;
+    return this._midi.duration * 1000;
   }
 }
 
@@ -33810,6 +33810,9 @@ function OctoplayTab() {
     if (playback.playing) {
       gcodeCommand.current.pause();
     } else {
+      if (gcodeCommand.current.state === "FINISHED") {
+        gcodeCommand.current.goToBeginning();
+      }
       gcodeCommand.current.unpause();
     }
     setPlayback((prev) => ({ playing: !prev.playing }));

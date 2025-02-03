@@ -54,6 +54,6 @@ export class MidiFile {
     return this._file.size;
   }
   public get midiDurationMs(): number {
-    return this._midi.duration;
+    return this._midi.duration * 1000;
   }
 }

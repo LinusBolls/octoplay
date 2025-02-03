@@ -145,6 +145,9 @@ export function OctoplayTab() {
     if (playback.playing) {
       gcodeCommand.current.pause();
     } else {
+      if (gcodeCommand.current.state === "FINISHED") {
+        gcodeCommand.current.goToBeginning();
+      }
       gcodeCommand.current.unpause();
     }
     setPlayback((prev) => ({ playing: !prev.playing }));

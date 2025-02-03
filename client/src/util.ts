@@ -62,7 +62,7 @@ export const noteToFreq = (note: number): number => {
 };
 
 export function getHumanReadableDuration(durationMs: number): string {
-  if (durationMs < 1000) return `${(durationMs / 1000).toFixed(1)}s`;
+  if (durationMs < 1000) return `${(durationMs / 1000).toFixed(0)}s`;
 
   const seconds = Math.floor(durationMs / 1000) % 60;
   const minutes = Math.floor(durationMs / (1000 * 60)) % 60;
