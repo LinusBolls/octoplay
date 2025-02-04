@@ -1,4 +1,4 @@
-import { Midi, Track } from "@tonejs/midi";
+import { Track } from "@tonejs/midi";
 
 import { getGcodeRunDurationMs, noteToFreq } from "./util";
 
@@ -19,14 +19,13 @@ export type GcodeToMidiOptions = {
  * @param options.speed - Speed multiplier for the MIDI (default: 1).
  * @param options.tracks - Array of objects with an enabled boolean property for each track in the MIDI. If a track is disabled, it will be ignored. If the tracks option is not provided, only the first track will be used.
  */
-export function getGcodeFromMidi(midi: Midi, options?: GcodeToMidiOptions) {
-  if (!midi) {
-    throw new Error("No MIDI provided.");
-  }
-
+export function getGcodeFromMidi(
+  tracks: Track[],
+  options?: GcodeToMidiOptions
+) {
   const useG4 = options?.useG4 ?? false;
   const speed = options?.speed ?? 1;
-  const tracks = options?.tracks ?? [{ enabled: true }];
+  const tracksSettings = options?.tracks ?? [{ enabled: true }];
 
   const track: {
     notes: (Track["notes"] & any)[];
@@ -35,12 +34,12 @@ export function getGcodeFromMidi(midi: Midi, options?: GcodeToMidiOptions) {
   };
 
   // Merge note arrays from selected tracks
-  for (let i = 0; i < midi.tracks.length; i++) {
-    if (tracks[i]?.enabled ?? false) {
-      let currTrack = midi.tracks[i].notes;
+  for (let i = 0; i < tracks.length; i++) {
+    if (tracksSettings[i]?.enabled ?? false) {
+      let currTrack = tracks[i].notes;
 
       // If percussion, add a percussion flag to note
-      if (midi.tracks[i].instrument.percussion) {
+      if (tracks[i].instrument.percussion) {
         currTrack.forEach((note) => {
           // @ts-expect-error todo: fix note typing
           note.percussion = true;

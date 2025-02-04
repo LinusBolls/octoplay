@@ -1,60 +1,247 @@
 import * as Tone from "tone";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { MidiFile } from "./MidiFile";
-import { formatFileSize, getHumanReadableDuration } from "./util";
-import type { GcodeToMidiOptions } from "./getGcodeFromMidi";
+import {
+  formatDuration,
+  formatFileSize,
+  getHumanReadableDuration,
+} from "./util";
+import { type GcodeToMidiOptions } from "./getGcodeFromMidi";
 import { GcodeCommand } from "./GcodeCommand";
 import { useInterval } from "./useInterval";
+import { deleteMIDIFile, getAllMIDIFiles, storeMIDIFile } from "./storage";
+import { usePreview, type Preview } from "./usePreview";
 
-const synth = new Tone.Synth({
-  oscillator: {
-    type: "square",
-  },
-  envelope: {
-    attack: 0,
-    decay: 0,
-    sustain: 1,
-    release: 0.001,
-  },
-}).toDestination();
-
-synth.volume.value = -25;
+const FLOATING_UPLOAD_BUTTON = false;
 
 function FilesBrowser({
+  preview,
   files,
   selectedId,
   onSelect,
+  onDeleteEntry,
+  onRenameEntry,
+  onDownloadEntry,
+  onUpload,
+  onCopyGcode,
+  onTogglePlayback,
+
+  onCancelPreview,
 }: {
+  preview: Preview;
   files: MidiFile[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onDeleteEntry: (id: string) => void;
+  onRenameEntry: (id: string, name: string) => void;
+  onDownloadEntry: (id: string) => void;
+  onUpload: (files: FileList) => void;
+  onCopyGcode: (id: string) => void;
+  onTogglePlayback: (id: string) => void;
+
+  onCancelPreview: () => void;
 }) {
   return (
-    <div>
-      {files.map((i) => {
-        const isActive = selectedId === i.id;
-        return (
+    <div
+      className="accordion-inner"
+      style={{ position: "relative", boxSizing: "border-box" }}
+    >
+      {preview.playing && (
+        <div
+          style={{
+            position: "absolute",
+            display: "flex",
+            width: "100%",
+            bottom: 0,
+            left: 0,
+            zIndex: 1,
+
+            padding: "5px",
+
+            boxSizing: "border-box",
+          }}
+        >
           <div
-            onClick={() => onSelect(i.id)}
-            key={i.id}
+            className="accordion-group"
             style={{
               display: "flex",
-              flexDirection: "column",
-              boxSizing: "border-box",
+
+              background: "white",
+
               padding: "5px",
-              background: isActive ? "rgb(245, 245, 245" : undefined,
+
+              width: "100%",
             }}
           >
-            <div>{i.fileName}</div>
-            <small className="muted">{formatFileSize(i.fileSize)}</small>
-            <small className="muted">
-              {getHumanReadableDuration(i.midiDurationMs)}
-            </small>
-            <small className="muted">{i.tracks.length} tracks</small>
+            {/* TODO: start/stop button here */}
+            {preview.track?.fileName || <i>Unnamed File</i>}
+            {/* TODO: time here */}
+            <button
+              className="btn btn-mini"
+              title="Cancel preview"
+              aria-label="Cancel preview"
+              role="link"
+              onClick={(e) => {
+                e.stopPropagation();
+                onCancelPreview();
+              }}
+              style={{ marginLeft: "auto" }}
+            >
+              <i className="fas fa-x"></i>
+            </button>
           </div>
-        );
-      })}
+        </div>
+      )}
+      {FLOATING_UPLOAD_BUTTON && (
+        <div
+          style={{
+            position: "absolute",
+            display: "flex",
+            justifyContent: "flex-end",
+            width: "100%",
+            top: 0,
+            right: 0,
+            zIndex: 1,
+          }}
+        >
+          <FileUpload onInput={onUpload} />
+        </div>
+      )}
+      <div style={{ overflowY: "scroll", height: "32rem" }}>
+        {files
+          .sort((a, b) => a.fileName.localeCompare(b.fileName))
+          .map((i) => {
+            const isActive = selectedId === i.id;
+            return (
+              <div
+                onClick={i.isPlayable ? () => onSelect(i.id) : undefined}
+                style={{
+                  position: "relative",
+                  display: "flex",
+                  alignItems: "center",
+                  padding: "5px",
+                  gap: "5px",
+
+                  borderBottom: "1px solid rgb(221, 221, 221)",
+                  background: isActive ? "rgb(245, 245, 245" : undefined,
+                  cursor: i.isPlayable ? "pointer" : "default",
+                }}
+                title={i.isPlayable ? undefined : "File not playable"}
+              >
+                <button
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: "30px",
+                    height: "30px",
+                    margin: 0,
+
+                    border: "none",
+                    background: "none",
+                    boxShadow: "none",
+
+                    outline: "none",
+                  }}
+                  title="Play Preview"
+                  className="btn span4"
+                  disabled={!i.isPlayable}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTogglePlayback(i.id);
+                  }}
+                >
+                  <i
+                    className={
+                      "fas " +
+                      (preview.playing && preview.track?.id === i.id
+                        ? "fa-pause"
+                        : "fa-play")
+                    }
+                  ></i>
+                </button>
+
+                <div
+                  key={i.id}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+
+                    opacity: i.isPlayable ? undefined : 0.5,
+                  }}
+                >
+                  <div>{i.fileName || <i>Unnamed File</i>}</div>
+                  <div style={{ display: "flex", gap: "4px" }}>
+                    <small className="muted">
+                      {getHumanReadableDuration(i.midiDurationMs)}
+                    </small>
+                    <small className="muted">•</small>
+                    <small className="muted">
+                      {formatFileSize(i.fileSize)}
+                    </small>
+                    <small className="muted">•</small>
+                    <small className="muted">{i.tracks.length} tracks</small>
+                  </div>
+                </div>
+                <div
+                  className="btn-group"
+                  style={{ position: "absolute", bottom: "5px", right: "5px" }}
+                >
+                  <button
+                    disabled={!i.isPlayable}
+                    className="btn btn-mini"
+                    title="Copy G-Code"
+                    aria-label="Copy G-Code"
+                    role="link"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCopyGcode(i.id);
+                    }}
+                  >
+                    <i className="fas fa-code"></i>
+                  </button>
+                  <button
+                    className="btn btn-mini"
+                    title="Download"
+                    aria-label="Download"
+                    role="link"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDownloadEntry(i.id);
+                    }}
+                  >
+                    <i className="fas fa-download"></i>
+                  </button>
+                  {/* <button
+                    className="btn btn-mini"
+                    title="Rename"
+                    aria-label="Rename"
+                    role="link"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRenameEntry(i.id, i.fileName);
+                    }}
+                  >
+                    <i className="fas fa-cut"></i>
+                  </button> */}
+                  <button
+                    className="btn btn-mini"
+                    title="Remove"
+                    aria-label="Remove"
+                    role="link"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteEntry(i.id);
+                    }}
+                  >
+                    <i className="far fa-trash-alt"></i>
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+      </div>
     </div>
   );
 }
@@ -63,80 +250,101 @@ function FileUpload({ onInput }: { onInput: (files: FileList) => void }) {
   return (
     <span
       className="btn btn-primary fileinput-button span6"
-      style={{ marginBottom: "10px" }}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "4px",
+
+        height: "auto",
+
+        whiteSpace: "nowrap",
+      }}
     >
       <i className="fas fa-upload"></i>
       <span className="hidden-tablet UICHideTablet">Upload MIDI</span>
-      <input
-        onInput={(e) => {
-          if (e.currentTarget.files) onInput(e.currentTarget.files);
-        }}
-        accept=".mid"
-        type="file"
-        className="fileinput-button"
-        multiple
-      />
+      <div>
+        <input
+          onInput={(e) => {
+            if (e.currentTarget.files) onInput(e.currentTarget.files);
+          }}
+          accept="audio/midi,audio/x-midi,.mid,.midi"
+          type="file"
+          className="fileinput-button"
+          multiple
+        />
+      </div>
     </span>
   );
 }
 
-function playNote(frequency: number, duration: number) {
-  // Simulate a startup time of 5ms
-  return (time: number) => {
-    synth.triggerAttackRelease(frequency, duration - 5 / 1000, time);
-  };
-}
-
 export function OctoplayTab() {
-  const [playbackOptions, setPlaybackOptions] = useState<GcodeToMidiOptions>({
-    useG4: false,
-    speed: 1,
-    tracks: [{ enabled: true }],
-  });
+  const [useG4, setUseG4] = useState(false);
   const [files, setFiles] = useState<MidiFile[]>([]);
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
+
+  useEffect(() => {
+    getAllMIDIFiles().then(async (store) => {
+      const storedFiles = await Promise.all(store.map(MidiFile.fromJSON));
+
+      setFiles(storedFiles);
+
+      setActiveFileId(
+        storedFiles
+          .sort((a, b) => a.fileName.localeCompare(b.fileName))
+          .find((i) => i.isPlayable)?.id ?? null
+      );
+    });
+  }, []);
 
   // TODO: implement chunked playback
   const [gcodeChunkMs, setGcodeChunkMs] = useState<number | null>(null);
 
   const activeFile = files.find((i) => i.id === activeFileId);
 
-  const [playback, setPlayback] = useState({ playing: false });
+  const [playback, setPlayback] = useState({
+    playing: false,
+    durationMs: 0,
+    progressMs: 0,
+  });
 
   const gcodeCommand = useRef<GcodeCommand | null>(null);
 
   useInterval(() => {
     if (gcodeCommand.current) {
       gcodeCommand.current.tick();
-      setPlayback({ playing: gcodeCommand.current.state === "PLAYING" });
+      setPlayback({
+        playing: gcodeCommand.current.state === "PLAYING",
+        durationMs: gcodeCommand.current.durationMs,
+        progressMs: gcodeCommand.current.progressMs,
+      });
     }
   }, 100);
 
+  const { preview, setPreviewTrack, togglePreviewTrack, cancelPreview } =
+    usePreview();
+
   useEffect(() => {
-    for (const note of activeFile?.getGcode(playbackOptions).schedule ?? []) {
-      Tone.getTransport().schedule(
-        playNote(note.frequency, note.duration),
-        note.time
-      );
-    }
-
-    // clear previous scheduled tones
-    Tone.getTransport().stop();
-    Tone.getTransport().cancel();
-
     gcodeCommand.current = new GcodeCommand(
-      activeFile?.getGcode(playbackOptions).gcode!,
+      activeFile?.getGcode().gcode!,
       gcodeChunkMs
     );
-    setPlayback({ playing: false });
-  }, [activeFileId, playbackOptions, gcodeChunkMs]);
+    setPlayback({
+      playing: false,
+      durationMs: gcodeCommand.current.durationMs,
+      progressMs: 0,
+    });
+  }, [activeFileId, useG4, gcodeChunkMs]);
 
   function togglePreview() {
     Tone.getTransport().toggle();
   }
 
   function skipPreviewToStart() {
-    Tone.getTransport().stop();
+    // const file = files.find((i) => i.id === preview.trackId);
+    // if (file) {
+    //   setPreviewTrack(file.id, file.getGcode().schedule, false);
+    // }
   }
 
   function togglePlayback() {
@@ -150,7 +358,7 @@ export function OctoplayTab() {
       }
       gcodeCommand.current.unpause();
     }
-    setPlayback((prev) => ({ playing: !prev.playing }));
+    setPlayback((prev) => ({ ...prev, playing: !prev.playing }));
   }
 
   function skipPlaybackToStart() {
@@ -159,35 +367,107 @@ export function OctoplayTab() {
     gcodeCommand.current.goToBeginning();
   }
 
-  const preview = {
-    playing: Tone.getTransport().state === "started",
-  };
-
-  async function onMidiUpload(rawFiles: FileList) {
+  const onMidiUpload = useCallback(async (rawFiles: FileList) => {
     const newMidifiles = await Promise.all(
       Array.from(rawFiles).map((i) => MidiFile.fromFile(i))
     );
     setFiles((prev) => [...prev, ...newMidifiles]);
 
-    if (!activeFile) setActiveFileId(newMidifiles[0]?.id);
-  }
+    newMidifiles.map((i) => storeMIDIFile(i.toJSON()));
+
+    setActiveFileId(
+      (prev) => prev ?? newMidifiles.find((i) => i.isPlayable)?.id ?? null
+    );
+  }, []);
+
+  const onDeleteEntry = useCallback((id: string) => {
+    setFiles((prev) => prev.filter((i) => i.id !== id));
+
+    deleteMIDIFile(id);
+  }, []);
+
+  const onDownloadEntry = useCallback(
+    (id: string) => {
+      const file = files.find((i) => i.id === id);
+
+      if (!file) return;
+
+      // Create a temporary download link
+      const link = document.createElement("a");
+      link.href = file.dataURL;
+      link.download = file.fileName;
+      document.body.appendChild(link);
+      link.click();
+
+      // Cleanup
+      document.body.removeChild(link);
+      URL.revokeObjectURL(file.dataURL);
+    },
+    [files]
+  );
+
+  const onRenameEntry = useCallback((id: string, name: string) => {
+    setFiles((prev) => [
+      ...prev.map((i) => (i.id === id ? i.setFileName(name) : i)),
+    ]);
+    storeMIDIFile(files.find((i) => i.id === id)!.toJSON());
+  }, []);
+
+  const hasFiles = files.length > 0;
 
   return (
     <div style={{ display: "flex", flexDirection: "column" }}>
-      <FilesBrowser
-        files={files}
-        selectedId={activeFileId}
-        onSelect={setActiveFileId}
-      />
-      <FileUpload onInput={onMidiUpload} />
+      <div
+        className="accordion-inner"
+        style={{ display: "flex", alignItems: "center" }}
+      >
+        <h1 style={{ margin: 0, border: "none" }}>MIDI Player</h1>
+        <FileUpload onInput={onMidiUpload} />
+      </div>
+      {hasFiles && (
+        <FilesBrowser
+          preview={preview}
+          files={files}
+          selectedId={activeFileId}
+          onSelect={setActiveFileId}
+          onDeleteEntry={onDeleteEntry}
+          onRenameEntry={onRenameEntry}
+          onDownloadEntry={onDownloadEntry}
+          onUpload={onMidiUpload}
+          onCopyGcode={(id) => {
+            const file = files.find((i) => i.id === id);
+
+            if (!file) return;
+
+            navigator.clipboard.writeText(file.getGcode().gcode);
+          }}
+          onTogglePlayback={(id) => {
+            const file = files.find((i) => i.id === id);
+
+            if (!file) return;
+
+            setPreviewTrack(file.getCopy(), true);
+          }}
+          onCancelPreview={cancelPreview}
+        />
+      )}
       {activeFile && (
         <TrackControls
           midi={activeFile}
           preview={preview}
           togglePreview={togglePreview}
           skipPreviewToStart={skipPreviewToStart}
-          playbackOptions={playbackOptions}
-          onPlaybackOptionsChange={setPlaybackOptions}
+          onPlaybackOptionsChange={(options) =>
+            setFiles((prev) => {
+              const sachen = prev.map((i) =>
+                i.id === activeFileId ? i.getCopy().setOptions(options) : i
+              );
+              console.log("storing sachen:", sachen);
+              sachen.map((i) => storeMIDIFile(i.toJSON()));
+
+              return sachen;
+            })
+          }
           playback={{
             ...playback,
             chunkIntervalMs: gcodeChunkMs,
@@ -203,7 +483,7 @@ export function OctoplayTab() {
 
 export function TrackControls({
   midi,
-  playbackOptions,
+  // playbackOptions,
   onPlaybackOptionsChange,
   preview,
   togglePreview,
@@ -213,115 +493,238 @@ export function TrackControls({
   skipPlaybackToStart,
 }: {
   midi: MidiFile;
-  playbackOptions: GcodeToMidiOptions;
+  // playbackOptions: GcodeToMidiOptions;
   onPlaybackOptionsChange: (options: GcodeToMidiOptions) => void;
-  preview: { playing: boolean };
+  preview: Preview;
   togglePreview: () => void;
   skipPreviewToStart: () => void;
   playback: {
     playing: boolean;
     chunkIntervalMs: number | null;
     chunked: boolean;
+
+    progressMs: number;
+    durationMs: number;
   };
   togglePlayback: () => void;
   skipPlaybackToStart: () => void;
 }) {
+  const [showSettings, setShowSettings] = useState(false);
+
+  const hasMultipleTracks = (midi.tracks?.length ?? 0) > 1;
+
   return (
     <div>
-      <div style={{ display: "flex", flexDirection: "column" }}>
-        {midi.tracks?.map((track, idx) => {
-          const trackSettings = playbackOptions.tracks?.[idx];
-
-          return (
-            <label key={idx} className="checkbox">
-              <input
-                type="checkbox"
-                checked={trackSettings?.enabled}
-                onChange={(e) => {
-                  const newTracks = [...playbackOptions.tracks!];
-                  newTracks[idx] = {
-                    ...newTracks[idx],
-                    enabled: e.target.checked,
-                  };
-                  onPlaybackOptionsChange({
-                    ...playbackOptions,
-                    tracks: newTracks,
-                  });
-                }}
-              />
-              <span>
-                Track {idx + 1}: {track.name} - {track.notes.length} notes
-              </span>
-            </label>
-          );
-        })}
-        <label>
-          Speed multiplier:
-          <input
-            type="number"
-            step="0.01"
-            min="0.01"
-            value={playbackOptions.speed!}
-            onChange={(e) =>
-              onPlaybackOptionsChange({
-                ...playbackOptions,
-                speed: parseFloat(e.target.value),
-              })
-            }
-          />
-        </label>
-      </div>
-      <div style={{ display: "flex" }}>
-        <button className="btn span4" onClick={togglePreview}>
+      {/* <div style={{ display: "flex" }}>
+        <button
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "4px",
+          }}
+          className="btn span4"
+          onClick={togglePreview}
+        >
           <i
             className={"fas " + (preview.playing ? "fa-pause" : "fa-play")}
           ></i>
-          <span>Play/Pause Preview</span>
+          <span>{preview.playing ? "Pause" : "Play"} Preview</span>
         </button>
-        <button className="btn span4" onClick={skipPreviewToStart}>
+        <button
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "4px",
+          }}
+          className="btn span4"
+          onClick={skipPreviewToStart}
+        >
           <i className="fas fa-step-backward"></i>
           <span>Restart Preview</span>
         </button>
-        <button
-          className="btn span4"
-          onClick={togglePlayback}
-          disabled={playback.playing && !playback.chunked}
+      <div>*/}
+      <div
+        className="accordion-inner"
+        style={{ display: "flex", flexDirection: "column" }}
+      >
+        <span style={{ marginBottom: "0.5rem" }}>
+          {midi.fileName || <i>Unnamed File</i>}
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <button
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "30px",
+              height: "30px",
+              margin: 0,
+            }}
+            className="btn span4"
+            onClick={skipPlaybackToStart}
+          >
+            <i className={"fas fa-step-backward"}></i>
+          </button>
+          <button
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "30px",
+              height: "30px",
+              margin: 0,
+            }}
+            className="btn span4"
+            onClick={togglePlayback}
+            disabled={playback.playing && !playback.chunked}
+          >
+            <i
+              className={"fas " + (playback.playing ? "fa-pause" : "fa-play")}
+            ></i>
+          </button>
+          <span>0:01</span>
+          <div
+            className="progress progress-text-centered"
+            style={{ width: "100%", margin: 0 }}
+          >
+            <div
+              className="bar"
+              style={{
+                width:
+                  (playback.playing
+                    ? (playback.progressMs / playback.durationMs) * 100
+                    : 0) + "%",
+              }}
+            ></div>
+            <span className="progress-text-back"></span>
+          </div>
+          <span>
+            {formatDuration(
+              midi.midiDurationMs >= 1000 ? midi.midiDurationMs : 1000
+            )}
+          </span>
+          <button
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "30px",
+              height: "30px",
+              margin: 0,
+            }}
+            className="btn span4"
+            onClick={() => setShowSettings((prev) => !prev)}
+          >
+            <i className="fas fa-wrench"></i>
+          </button>
+        </div>
+        <div
+          style={{
+            overflow: "hidden",
+            height: showSettings ? "auto" : "0px",
+          }}
         >
-          <i
-            className={"fas " + (playback.playing ? "fa-pause" : "fa-play")}
-          ></i>
-          <span>Play/Pause Playback</span>
-        </button>
-        <button className="btn span4" onClick={skipPlaybackToStart}>
-          <i className={"fas fa-step-backward"}></i>
-          <span>Restart Playback</span>
-        </button>
+          <div style={{ paddingTop: "14px" }}>
+            {hasMultipleTracks && (
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                {midi.tracks?.map((track, idx) => {
+                  const trackSettings = midi.options.tracks?.[idx];
+
+                  return (
+                    <label key={idx} className="checkbox">
+                      <input
+                        type="checkbox"
+                        checked={trackSettings?.enabled}
+                        onChange={(e) => {
+                          const newTracks = [...midi.options.tracks!];
+                          newTracks[idx] = {
+                            ...newTracks[idx],
+                            enabled: e.target.checked,
+                          };
+                          onPlaybackOptionsChange({
+                            ...midi.options,
+                            tracks: newTracks,
+                          });
+                        }}
+                      />
+                      <span>
+                        Track {idx + 1}: {track.name} - {track.notes.length}{" "}
+                        notes
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            <label>
+              Speed:
+              <input
+                type="number"
+                step="0.1"
+                min="0.1"
+                value={midi.options.speed!}
+                onChange={(e) =>
+                  onPlaybackOptionsChange({
+                    ...midi.options,
+                    speed: parseFloat(e.target.value),
+                  })
+                }
+              />
+            </label>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={midi.options.useG4}
+                onChange={(e) =>
+                  onPlaybackOptionsChange({
+                    ...midi.options,
+                    useG4: e.target.checked,
+                  })
+                }
+              />
+              <span>Printer runs on Duet firmware</span>
+            </label>
+            <textarea
+              rows={10}
+              cols={100}
+              style={{ width: "100%", resize: "vertical" }}
+              value={midi.getGcode().gcode}
+            />
+
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                // checked={playbackOptions.useG4}
+                // onChange={(e) =>
+                //   onPlaybackOptionsChange({
+                //     ...playbackOptions,
+                //     useG4: e.target.checked,
+                //   })
+                // }
+              />
+              <span>Chunked playback</span>
+            </label>
+            <label>
+              Playback chunk size (ms):
+              <input
+                type="number"
+                step="100"
+                min="100"
+                max="10000"
+                value={playback.chunkIntervalMs ?? 10}
+                // onChange={(e) =>
+                //   onPlaybackOptionsChange({
+                //     ...playbackOptions,
+                //     speed: parseFloat(e.target.value),
+                //   })
+                // }
+              />
+            </label>
+          </div>
+        </div>
       </div>
-      <br />
-      <label className="checkbox">
-        <input
-          type="checkbox"
-          checked={playbackOptions.useG4}
-          onChange={(e) =>
-            onPlaybackOptionsChange({
-              ...playbackOptions,
-              useG4: e.target.checked,
-            })
-          }
-        />
-        <span>Add G4 after M300 (required for Duet)</span>
-      </label>
-      <br />
-      <div>
-        {getHumanReadableDuration(midi.getGcode(playbackOptions).durationMs)}
-      </div>
-      <br />
-      <textarea
-        rows={10}
-        cols={100}
-        style={{ width: "100%", resize: "vertical" }}
-        value={midi.getGcode(playbackOptions).gcode}
-      />
     </div>
   );
 }

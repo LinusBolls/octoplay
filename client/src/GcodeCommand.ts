@@ -10,6 +10,27 @@ export class GcodeCommand {
   private lastPlayedChunkIndex: number;
   public state: "PAUSED" | "PLAYING" | "FINISHED";
 
+  public get durationMs() {
+    return this.chunks.reduce(
+      (acc, chunk) =>
+        acc + getGcodeRunDurationMs(chunk.join("\n")) + this.chunkBleedMs,
+      0
+    );
+  }
+  public get progressMs() {
+    if (this.currentChunkStartedAt == null) {
+      return 0;
+    }
+    const currentChunkDuration = getGcodeRunDurationMs(
+      this.chunks[this.currentChunkIndex].join("\n")
+    );
+    return (
+      this.currentChunkIndex * this.chunkBleedMs +
+      this.currentChunkIndex * currentChunkDuration +
+      (Date.now() - this.currentChunkStartedAt)
+    );
+  }
+
   constructor(gcode: string, chunkMaxDurationMs: number | null = 1000) {
     this.gcode = gcode;
     this.chunks =

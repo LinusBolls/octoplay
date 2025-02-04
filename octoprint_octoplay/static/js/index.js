@@ -27187,6 +27187,9 @@ function setContext(context2, disposeOld = false) {
     globalContext = context2;
   }
 }
+function start() {
+  return globalContext.resume();
+}
 if (theWindow && !theWindow.TONE_SILENCE_LOGGING) {
   let prefix = "v";
   if (version === "dev") {
@@ -31555,9 +31558,9 @@ class FatOscillator extends Source {
   set spread(spread) {
     this._spread = spread;
     if (this._oscillators.length > 1) {
-      const start = -spread / 2;
+      const start2 = -spread / 2;
       const step = spread / (this._oscillators.length - 1);
-      this._forEach((osc, i) => osc.detune.value = start + step * i);
+      this._forEach((osc, i) => osc.detune.value = start2 + step * i);
     }
   }
   get count() {
@@ -33372,6 +33375,9 @@ class Channel extends ToneAudioNode {
 }
 Channel.buses = new Map;
 // node_modules/tone/build/esm/index.js
+function now() {
+  return getContext().now();
+}
 var Transport = getContext().transport;
 function getTransport() {
   return getContext().transport;
@@ -33383,7 +33389,7 @@ var Draw = getContext().draw;
 var context2 = getContext();
 
 // src/TrackControls.tsx
-var import_react2 = __toESM(require_react(), 1);
+var import_react3 = __toESM(require_react(), 1);
 
 // src/MidiFile.ts
 var import_midi = __toESM(require_Midi(), 1);
@@ -33436,6 +33442,8 @@ var noteToFreq = (note) => {
   return a / 32 * 2 ** ((note - 9) / 12);
 };
 function getHumanReadableDuration(durationMs) {
+  if (!isFinite(durationMs))
+    return "0s";
   if (durationMs < 1000)
     return `${(durationMs / 1000).toFixed(0)}s`;
   const seconds = Math.floor(durationMs / 1000) % 60;
@@ -33458,22 +33466,26 @@ function formatFileSize(bytes, decimals = 1) {
   const fileSize = bytes / Math.pow(1024, i);
   return `${parseFloat(fileSize.toFixed(decimals))}${sizes[i]}`;
 }
+function formatDuration(ms) {
+  const seconds = Math.floor(ms / 1000) % 60;
+  const minutes = Math.floor(ms / (1000 * 60)) % 60;
+  const hours = Math.floor(ms / (1000 * 60 * 60));
+  const pad = (num) => num.toString().padStart(2, "0");
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+}
 
 // src/getGcodeFromMidi.ts
-function getGcodeFromMidi(midi, options) {
-  if (!midi) {
-    throw new Error("No MIDI provided.");
-  }
+function getGcodeFromMidi(tracks, options) {
   const useG4 = options?.useG4 ?? false;
   const speed = options?.speed ?? 1;
-  const tracks = options?.tracks ?? [{ enabled: true }];
+  const tracksSettings = options?.tracks ?? [{ enabled: true }];
   const track = {
     notes: []
   };
-  for (let i = 0;i < midi.tracks.length; i++) {
-    if (tracks[i]?.enabled ?? false) {
-      let currTrack = midi.tracks[i].notes;
-      if (midi.tracks[i].instrument.percussion) {
+  for (let i = 0;i < tracks.length; i++) {
+    if (tracksSettings[i]?.enabled ?? false) {
+      let currTrack = tracks[i].notes;
+      if (tracks[i].instrument.percussion) {
         currTrack.forEach((note) => {
           note.percussion = true;
         });
@@ -33535,14 +33547,20 @@ function getGcodeFromMidi(midi, options) {
 
 // src/MidiFile.ts
 function readMidiFile(file) {
-  return new Promise((res) => {
+  return new Promise((res, rej) => {
     const reader = new FileReader;
     reader.onload = (e) => {
       const result = e.target?.result;
       if (!result || !(result instanceof ArrayBuffer)) {
         throw new Error("Invalid file provided.");
       }
-      const midi = new import_midi.Midi(result);
+      let midi;
+      try {
+        midi = new import_midi.Midi(result);
+      } catch (err) {
+        rej(err);
+        return;
+      }
       if (!midi) {
         throw new Error("Invalid file provided.");
       }
@@ -33551,25 +33569,59 @@ function readMidiFile(file) {
     reader.readAsArrayBuffer(file);
   });
 }
+function getDefaultOptions() {
+  return {
+    speed: 1,
+    useG4: false,
+    tracks: [{ enabled: true }]
+  };
+}
 
 class MidiFile {
   id;
   _file;
   _midi;
-  constructor(file, midi) {
-    this.id = Math.random().toString(36).substr(2, 9);
+  constructor(file, midi, options, id) {
+    this.id = id ?? Math.random().toString(36).substr(2, 9);
     this._file = file;
     this._midi = midi;
+    this._options = options;
   }
   static async fromFile(file) {
-    const midi = await readMidiFile(file);
-    return new MidiFile(file, midi);
+    try {
+      const midi = await readMidiFile(file);
+      return new MidiFile(file, midi, getDefaultOptions());
+    } catch (err) {
+      return new MidiFile(file, new import_midi.Midi, getDefaultOptions());
+    }
   }
-  getGcode(options) {
-    return getGcodeFromMidi(this._midi, options);
+  static async fromJSON(json) {
+    try {
+      const midi = await readMidiFile(json.file);
+      return new MidiFile(json.file, midi, json.options, json.name);
+    } catch (err) {
+      return new MidiFile(json.file, new import_midi.Midi, getDefaultOptions(), json.name);
+    }
+  }
+  toJSON() {
+    return {
+      name: this.id,
+      file: this._file,
+      options: this._options
+    };
+  }
+  getGcode() {
+    return getGcodeFromMidi(this.tracks, this._options);
   }
   get tracks() {
-    return this._midi.tracks;
+    return this._midi.tracks.filter((i) => i.notes.length > 0).sort((a, b) => {
+      const aFirstNote = a.notes.sort((a2, b2) => a2.time - b2.time)[0];
+      const bFirstNote = b.notes.sort((a2, b2) => a2.time - b2.time)[0];
+      if (aFirstNote.time === bFirstNote.time) {
+        return a.notes.length - b.notes.length;
+      }
+      return aFirstNote.time - bFirstNote.time;
+    });
   }
   get fileName() {
     return this._file.name;
@@ -33579,6 +33631,30 @@ class MidiFile {
   }
   get midiDurationMs() {
     return this._midi.duration * 1000;
+  }
+  get dataURL() {
+    return URL.createObjectURL(this._file);
+  }
+  get isEmpty() {
+    return this._midi.tracks.length === 0;
+  }
+  get isPlayable() {
+    return !this.isEmpty;
+  }
+  setFileName(name) {
+    this._file = new File([this._file], name, this._file);
+    return this;
+  }
+  getCopy() {
+    return new MidiFile(this._file, this._midi, this._options, this.id);
+  }
+  _options;
+  get options() {
+    return this._options;
+  }
+  setOptions(options) {
+    this._options = options;
+    return this;
   }
 }
 
@@ -33592,6 +33668,18 @@ class GcodeCommand {
   currentChunkStartedAt;
   lastPlayedChunkIndex;
   state;
+  get durationMs() {
+    return this.chunks.reduce((acc, chunk) => acc + getGcodeRunDurationMs(chunk.join(`
+`)) + this.chunkBleedMs, 0);
+  }
+  get progressMs() {
+    if (this.currentChunkStartedAt == null) {
+      return 0;
+    }
+    const currentChunkDuration = getGcodeRunDurationMs(this.chunks[this.currentChunkIndex].join(`
+`));
+    return this.currentChunkIndex * this.chunkBleedMs + this.currentChunkIndex * currentChunkDuration + (Date.now() - this.currentChunkStartedAt);
+  }
   constructor(gcode, chunkMaxDurationMs = 1000) {
     this.gcode = gcode;
     this.chunks = chunkMaxDurationMs == null ? [[gcode]] : gcodeToChunks(gcode, chunkMaxDurationMs);
@@ -33686,65 +33774,367 @@ function useInterval(callback, delay) {
   }, [delay]);
 }
 
-// src/TrackControls.tsx
-var jsx_dev_runtime = __toESM(require_jsx_dev_runtime(), 1);
+// src/storage.ts
+var DB_NAME = "MIDIStorage";
+var DB_VERSION = 1;
+var STORE_NAME = "midiFiles";
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = (event2) => {
+      const db = event2.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: "name" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+async function storeMIDIFile(midiFile) {
+  const db = await openDB();
+  const transaction = db.transaction(STORE_NAME, "readwrite");
+  const store = transaction.objectStore(STORE_NAME);
+  store.put(midiFile);
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+async function getAllMIDIFiles() {
+  const db = await openDB();
+  const transaction = db.transaction(STORE_NAME, "readonly");
+  const store = transaction.objectStore(STORE_NAME);
+  return new Promise((resolve, reject) => {
+    const request = store.getAll();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+async function deleteMIDIFile(fileName) {
+  const db = await openDB();
+  const transaction = db.transaction(STORE_NAME, "readwrite");
+  const store = transaction.objectStore(STORE_NAME);
+  store.delete(fileName);
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+// src/usePreview.ts
+var import_react2 = __toESM(require_react(), 1);
 var synth = new Synth({
-  oscillator: {
-    type: "square"
-  },
-  envelope: {
-    attack: 0,
-    decay: 0,
-    sustain: 1,
-    release: 0.001
-  }
+  oscillator: { type: "square" },
+  envelope: { attack: 0, decay: 0, sustain: 1, release: 0.001 }
 }).toDestination();
 synth.volume.value = -25;
+function playNote(frequency, duration) {
+  return (time) => {
+    synth.triggerAttackRelease(frequency, duration - 5 / 1000, time);
+  };
+}
+function usePreview() {
+  const [willPlay, setWillPlay] = import_react2.useState(false);
+  const [preview, setPreview] = import_react2.useState({
+    track: null,
+    playing: false,
+    progressMs: 0,
+    durationMs: 0
+  });
+  const previewRef = import_react2.useRef(preview);
+  previewRef.current = preview;
+  function setPreviewTrack(track, autoPlay = false) {
+    const lastNote = track.getGcode().schedule.reduce((a, b) => a.time > b.time ? a : b);
+    const durationMs = (lastNote.time + lastNote.duration) * 1000;
+    getTransport().stop();
+    getTransport().cancel();
+    track.getGcode().schedule.forEach((note) => {
+      getTransport().schedule(playNote(note.frequency, note.duration), note.time);
+    });
+    setWillPlay(true);
+    setPreview({
+      track,
+      playing: false,
+      progressMs: 0,
+      durationMs
+    });
+    if (autoPlay) {
+      setTimeout(() => {
+        if (previewRef.current.track?.id === track.id) {
+          startPreviewTrack();
+          setWillPlay(false);
+        }
+      }, 100);
+    }
+  }
+  function startPreviewTrack() {
+    if (previewRef.current.playing)
+      return;
+    start();
+    getTransport().start();
+    const stopTime = (previewRef.current.durationMs - previewRef.current.progressMs) / 1000;
+    getTransport().scheduleOnce(() => {
+      stopPreviewTrack();
+    }, stopTime);
+    setPreview((prev) => ({ ...prev, playing: true }));
+  }
+  function stopPreviewTrack() {
+    if (!previewRef.current.playing)
+      return;
+    getTransport().stop();
+    setPreview((prev) => ({ ...prev, playing: false, progressMs: 0 }));
+  }
+  function togglePreviewTrack() {
+    if (previewRef.current.playing) {
+      stopPreviewTrack();
+    } else {
+      startPreviewTrack();
+    }
+  }
+  useInterval(() => {
+    if (getTransport().state === "started") {
+      setPreview((prev) => ({
+        ...prev,
+        progressMs: now() * 1000
+      }));
+    }
+  }, 100);
+  function cancelPreview() {
+    getTransport().stop();
+    getTransport().cancel();
+    setPreview({ ...preview, playing: false, progressMs: 0 });
+  }
+  return {
+    preview: { ...preview, playing: preview.playing || willPlay },
+    setPreviewTrack,
+    togglePreviewTrack,
+    cancelPreview
+  };
+}
+
+// src/TrackControls.tsx
+var jsx_dev_runtime = __toESM(require_jsx_dev_runtime(), 1);
+var FLOATING_UPLOAD_BUTTON = false;
 function FilesBrowser({
+  preview,
   files,
   selectedId,
-  onSelect
+  onSelect,
+  onDeleteEntry,
+  onRenameEntry,
+  onDownloadEntry,
+  onUpload,
+  onCopyGcode,
+  onTogglePlayback,
+  onCancelPreview
 }) {
   return /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-    children: files.map((i) => {
-      const isActive = selectedId === i.id;
-      return /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-        onClick: () => onSelect(i.id),
+    className: "accordion-inner",
+    style: { position: "relative", boxSizing: "border-box" },
+    children: [
+      preview.playing && /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
         style: {
+          position: "absolute",
           display: "flex",
-          flexDirection: "column",
-          boxSizing: "border-box",
+          width: "100%",
+          bottom: 0,
+          left: 0,
+          zIndex: 1,
           padding: "5px",
-          background: isActive ? "rgb(245, 245, 245" : undefined
+          boxSizing: "border-box"
         },
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-            children: i.fileName
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("small", {
-            className: "muted",
-            children: formatFileSize(i.fileSize)
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("small", {
-            className: "muted",
-            children: getHumanReadableDuration(i.midiDurationMs)
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("small", {
-            className: "muted",
+        children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+          className: "accordion-group",
+          style: {
+            display: "flex",
+            background: "white",
+            padding: "5px",
+            width: "100%"
+          },
+          children: [
+            preview.track?.fileName || /* @__PURE__ */ jsx_dev_runtime.jsxDEV("i", {
+              children: "Unnamed File"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+              className: "btn btn-mini",
+              title: "Cancel preview",
+              "aria-label": "Cancel preview",
+              role: "link",
+              onClick: (e) => {
+                e.stopPropagation();
+                onCancelPreview();
+              },
+              style: { marginLeft: "auto" },
+              children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("i", {
+                className: "fas fa-x"
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      FLOATING_UPLOAD_BUTTON && /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+        style: {
+          position: "absolute",
+          display: "flex",
+          justifyContent: "flex-end",
+          width: "100%",
+          top: 0,
+          right: 0,
+          zIndex: 1
+        },
+        children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV(FileUpload, {
+          onInput: onUpload
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+        style: { overflowY: "scroll", height: "32rem" },
+        children: files.sort((a, b) => a.fileName.localeCompare(b.fileName)).map((i) => {
+          const isActive = selectedId === i.id;
+          return /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+            onClick: i.isPlayable ? () => onSelect(i.id) : undefined,
+            style: {
+              position: "relative",
+              display: "flex",
+              alignItems: "center",
+              padding: "5px",
+              gap: "5px",
+              borderBottom: "1px solid rgb(221, 221, 221)",
+              background: isActive ? "rgb(245, 245, 245" : undefined,
+              cursor: i.isPlayable ? "pointer" : "default"
+            },
+            title: i.isPlayable ? undefined : "File not playable",
             children: [
-              i.tracks.length,
-              " tracks"
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+                style: {
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: "30px",
+                  height: "30px",
+                  margin: 0,
+                  border: "none",
+                  background: "none",
+                  boxShadow: "none",
+                  outline: "none"
+                },
+                title: "Play Preview",
+                className: "btn span4",
+                disabled: !i.isPlayable,
+                onClick: (e) => {
+                  e.stopPropagation();
+                  onTogglePlayback(i.id);
+                },
+                children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("i", {
+                  className: "fas " + (preview.playing && preview.track?.id === i.id ? "fa-pause" : "fa-play")
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                style: {
+                  display: "flex",
+                  flexDirection: "column",
+                  opacity: i.isPlayable ? undefined : 0.5
+                },
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                    children: i.fileName || /* @__PURE__ */ jsx_dev_runtime.jsxDEV("i", {
+                      children: "Unnamed File"
+                    }, undefined, false, undefined, this)
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                    style: { display: "flex", gap: "4px" },
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("small", {
+                        className: "muted",
+                        children: getHumanReadableDuration(i.midiDurationMs)
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("small", {
+                        className: "muted",
+                        children: "•"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("small", {
+                        className: "muted",
+                        children: formatFileSize(i.fileSize)
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("small", {
+                        className: "muted",
+                        children: "•"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("small", {
+                        className: "muted",
+                        children: [
+                          i.tracks.length,
+                          " tracks"
+                        ]
+                      }, undefined, true, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this)
+                ]
+              }, i.id, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                className: "btn-group",
+                style: { position: "absolute", bottom: "5px", right: "5px" },
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+                    disabled: !i.isPlayable,
+                    className: "btn btn-mini",
+                    title: "Copy G-Code",
+                    "aria-label": "Copy G-Code",
+                    role: "link",
+                    onClick: (e) => {
+                      e.stopPropagation();
+                      onCopyGcode(i.id);
+                    },
+                    children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("i", {
+                      className: "fas fa-code"
+                    }, undefined, false, undefined, this)
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+                    className: "btn btn-mini",
+                    title: "Download",
+                    "aria-label": "Download",
+                    role: "link",
+                    onClick: (e) => {
+                      e.stopPropagation();
+                      onDownloadEntry(i.id);
+                    },
+                    children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("i", {
+                      className: "fas fa-download"
+                    }, undefined, false, undefined, this)
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+                    className: "btn btn-mini",
+                    title: "Remove",
+                    "aria-label": "Remove",
+                    role: "link",
+                    onClick: (e) => {
+                      e.stopPropagation();
+                      onDeleteEntry(i.id);
+                    },
+                    children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("i", {
+                      className: "far fa-trash-alt"
+                    }, undefined, false, undefined, this)
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
             ]
-          }, undefined, true, undefined, this)
-        ]
-      }, i.id, true, undefined, this);
-    })
-  }, undefined, false, undefined, this);
+          }, undefined, true, undefined, this);
+        })
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
 }
 function FileUpload({ onInput }) {
   return /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
     className: "btn btn-primary fileinput-button span6",
-    style: { marginBottom: "10px" },
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: "4px",
+      height: "auto",
+      whiteSpace: "nowrap"
+    },
     children: [
       /* @__PURE__ */ jsx_dev_runtime.jsxDEV("i", {
         className: "fas fa-upload"
@@ -33753,56 +34143,63 @@ function FileUpload({ onInput }) {
         className: "hidden-tablet UICHideTablet",
         children: "Upload MIDI"
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
-        onInput: (e) => {
-          if (e.currentTarget.files)
-            onInput(e.currentTarget.files);
-        },
-        accept: ".mid",
-        type: "file",
-        className: "fileinput-button",
-        multiple: true
+      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+        children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+          onInput: (e) => {
+            if (e.currentTarget.files)
+              onInput(e.currentTarget.files);
+          },
+          accept: "audio/midi,audio/x-midi,.mid,.midi",
+          type: "file",
+          className: "fileinput-button",
+          multiple: true
+        }, undefined, false, undefined, this)
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
-function playNote(frequency, duration) {
-  return (time) => {
-    synth.triggerAttackRelease(frequency, duration - 5 / 1000, time);
-  };
-}
 function OctoplayTab() {
-  const [playbackOptions, setPlaybackOptions] = import_react2.useState({
-    useG4: false,
-    speed: 1,
-    tracks: [{ enabled: true }]
-  });
-  const [files, setFiles] = import_react2.useState([]);
-  const [activeFileId, setActiveFileId] = import_react2.useState(null);
-  const [gcodeChunkMs, setGcodeChunkMs] = import_react2.useState(null);
+  const [useG4, setUseG4] = import_react3.useState(false);
+  const [files, setFiles] = import_react3.useState([]);
+  const [activeFileId, setActiveFileId] = import_react3.useState(null);
+  import_react3.useEffect(() => {
+    getAllMIDIFiles().then(async (store) => {
+      const storedFiles = await Promise.all(store.map(MidiFile.fromJSON));
+      setFiles(storedFiles);
+      setActiveFileId(storedFiles.sort((a, b) => a.fileName.localeCompare(b.fileName)).find((i) => i.isPlayable)?.id ?? null);
+    });
+  }, []);
+  const [gcodeChunkMs, setGcodeChunkMs] = import_react3.useState(null);
   const activeFile = files.find((i) => i.id === activeFileId);
-  const [playback, setPlayback] = import_react2.useState({ playing: false });
-  const gcodeCommand = import_react2.useRef(null);
+  const [playback, setPlayback] = import_react3.useState({
+    playing: false,
+    durationMs: 0,
+    progressMs: 0
+  });
+  const gcodeCommand = import_react3.useRef(null);
   useInterval(() => {
     if (gcodeCommand.current) {
       gcodeCommand.current.tick();
-      setPlayback({ playing: gcodeCommand.current.state === "PLAYING" });
+      setPlayback({
+        playing: gcodeCommand.current.state === "PLAYING",
+        durationMs: gcodeCommand.current.durationMs,
+        progressMs: gcodeCommand.current.progressMs
+      });
     }
   }, 100);
-  import_react2.useEffect(() => {
-    for (const note of activeFile?.getGcode(playbackOptions).schedule ?? []) {
-      getTransport().schedule(playNote(note.frequency, note.duration), note.time);
-    }
-    getTransport().stop();
-    getTransport().cancel();
-    gcodeCommand.current = new GcodeCommand(activeFile?.getGcode(playbackOptions).gcode, gcodeChunkMs);
-    setPlayback({ playing: false });
-  }, [activeFileId, playbackOptions, gcodeChunkMs]);
+  const { preview, setPreviewTrack, togglePreviewTrack, cancelPreview } = usePreview();
+  import_react3.useEffect(() => {
+    gcodeCommand.current = new GcodeCommand(activeFile?.getGcode().gcode, gcodeChunkMs);
+    setPlayback({
+      playing: false,
+      durationMs: gcodeCommand.current.durationMs,
+      progressMs: 0
+    });
+  }, [activeFileId, useG4, gcodeChunkMs]);
   function togglePreview() {
     getTransport().toggle();
   }
   function skipPreviewToStart() {
-    getTransport().stop();
   }
   function togglePlayback() {
     if (!gcodeCommand.current)
@@ -33815,40 +34212,92 @@ function OctoplayTab() {
       }
       gcodeCommand.current.unpause();
     }
-    setPlayback((prev) => ({ playing: !prev.playing }));
+    setPlayback((prev) => ({ ...prev, playing: !prev.playing }));
   }
   function skipPlaybackToStart() {
     if (!gcodeCommand.current)
       return;
     gcodeCommand.current.goToBeginning();
   }
-  const preview = {
-    playing: getTransport().state === "started"
-  };
-  async function onMidiUpload(rawFiles) {
+  const onMidiUpload = import_react3.useCallback(async (rawFiles) => {
     const newMidifiles = await Promise.all(Array.from(rawFiles).map((i) => MidiFile.fromFile(i)));
     setFiles((prev) => [...prev, ...newMidifiles]);
-    if (!activeFile)
-      setActiveFileId(newMidifiles[0]?.id);
-  }
+    newMidifiles.map((i) => storeMIDIFile(i.toJSON()));
+    setActiveFileId((prev) => prev ?? newMidifiles.find((i) => i.isPlayable)?.id ?? null);
+  }, []);
+  const onDeleteEntry = import_react3.useCallback((id) => {
+    setFiles((prev) => prev.filter((i) => i.id !== id));
+    deleteMIDIFile(id);
+  }, []);
+  const onDownloadEntry = import_react3.useCallback((id) => {
+    const file = files.find((i) => i.id === id);
+    if (!file)
+      return;
+    const link = document.createElement("a");
+    link.href = file.dataURL;
+    link.download = file.fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(file.dataURL);
+  }, [files]);
+  const onRenameEntry = import_react3.useCallback((id, name) => {
+    setFiles((prev) => [
+      ...prev.map((i) => i.id === id ? i.setFileName(name) : i)
+    ]);
+    storeMIDIFile(files.find((i) => i.id === id).toJSON());
+  }, []);
+  const hasFiles = files.length > 0;
   return /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
     style: { display: "flex", flexDirection: "column" },
     children: [
-      /* @__PURE__ */ jsx_dev_runtime.jsxDEV(FilesBrowser, {
+      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+        className: "accordion-inner",
+        style: { display: "flex", alignItems: "center" },
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("h1", {
+            style: { margin: 0, border: "none" },
+            children: "MIDI Player"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime.jsxDEV(FileUpload, {
+            onInput: onMidiUpload
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      hasFiles && /* @__PURE__ */ jsx_dev_runtime.jsxDEV(FilesBrowser, {
+        preview,
         files,
         selectedId: activeFileId,
-        onSelect: setActiveFileId
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime.jsxDEV(FileUpload, {
-        onInput: onMidiUpload
+        onSelect: setActiveFileId,
+        onDeleteEntry,
+        onRenameEntry,
+        onDownloadEntry,
+        onUpload: onMidiUpload,
+        onCopyGcode: (id) => {
+          const file = files.find((i) => i.id === id);
+          if (!file)
+            return;
+          navigator.clipboard.writeText(file.getGcode().gcode);
+        },
+        onTogglePlayback: (id) => {
+          const file = files.find((i) => i.id === id);
+          if (!file)
+            return;
+          setPreviewTrack(file.getCopy(), true);
+        },
+        onCancelPreview: cancelPreview
       }, undefined, false, undefined, this),
       activeFile && /* @__PURE__ */ jsx_dev_runtime.jsxDEV(TrackControls, {
         midi: activeFile,
         preview,
         togglePreview,
         skipPreviewToStart,
-        playbackOptions,
-        onPlaybackOptionsChange: setPlaybackOptions,
+        onPlaybackOptionsChange: (options) => setFiles((prev) => {
+          const sachen = prev.map((i) => i.id === activeFileId ? i.getCopy().setOptions(options) : i);
+          console.log("storing sachen:", sachen);
+          sachen.map((i) => storeMIDIFile(i.toJSON()));
+          return sachen;
+        }),
         playback: {
           ...playback,
           chunkIntervalMs: gcodeChunkMs,
@@ -33862,7 +34311,6 @@ function OctoplayTab() {
 }
 function TrackControls({
   midi,
-  playbackOptions,
   onPlaybackOptionsChange,
   preview,
   togglePreview,
@@ -33871,146 +34319,203 @@ function TrackControls({
   togglePlayback,
   skipPlaybackToStart
 }) {
+  const [showSettings, setShowSettings] = import_react3.useState(false);
+  const hasMultipleTracks = (midi.tracks?.length ?? 0) > 1;
   return /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-    children: [
-      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-        style: { display: "flex", flexDirection: "column" },
-        children: [
-          midi.tracks?.map((track, idx) => {
-            const trackSettings = playbackOptions.tracks?.[idx];
-            return /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
-              className: "checkbox",
+    children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+      className: "accordion-inner",
+      style: { display: "flex", flexDirection: "column" },
+      children: [
+        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+          style: { marginBottom: "0.5rem" },
+          children: midi.fileName || /* @__PURE__ */ jsx_dev_runtime.jsxDEV("i", {
+            children: "Unnamed File"
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+          style: { display: "flex", alignItems: "center", gap: "0.5rem" },
+          children: [
+            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+              style: {
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: "30px",
+                height: "30px",
+                margin: 0
+              },
+              className: "btn span4",
+              onClick: skipPlaybackToStart,
+              children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("i", {
+                className: "fas fa-step-backward"
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+              style: {
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: "30px",
+                height: "30px",
+                margin: 0
+              },
+              className: "btn span4",
+              onClick: togglePlayback,
+              disabled: playback.playing && !playback.chunked,
+              children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("i", {
+                className: "fas " + (playback.playing ? "fa-pause" : "fa-play")
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+              children: "0:01"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+              className: "progress progress-text-centered",
+              style: { width: "100%", margin: 0 },
               children: [
-                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
-                  type: "checkbox",
-                  checked: trackSettings?.enabled,
-                  onChange: (e) => {
-                    const newTracks = [...playbackOptions.tracks];
-                    newTracks[idx] = {
-                      ...newTracks[idx],
-                      enabled: e.target.checked
-                    };
-                    onPlaybackOptionsChange({
-                      ...playbackOptions,
-                      tracks: newTracks
-                    });
+                /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                  className: "bar",
+                  style: {
+                    width: (playback.playing ? playback.progressMs / playback.durationMs * 100 : 0) + "%"
                   }
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
-                  children: [
-                    "Track ",
-                    idx + 1,
-                    ": ",
-                    track.name,
-                    " - ",
-                    track.notes.length,
-                    " notes"
-                  ]
-                }, undefined, true, undefined, this)
+                  className: "progress-text-back"
+                }, undefined, false, undefined, this)
               ]
-            }, idx, true, undefined, this);
-          }),
-          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+              children: formatDuration(midi.midiDurationMs >= 1000 ? midi.midiDurationMs : 1000)
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+              style: {
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: "30px",
+                height: "30px",
+                margin: 0
+              },
+              className: "btn span4",
+              onClick: () => setShowSettings((prev) => !prev),
+              children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("i", {
+                className: "fas fa-wrench"
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this),
+        /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+          style: {
+            overflow: "hidden",
+            height: showSettings ? "auto" : "0px"
+          },
+          children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+            style: { paddingTop: "14px" },
             children: [
-              "Speed multiplier:",
-              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
-                type: "number",
-                step: "0.01",
-                min: "0.01",
-                value: playbackOptions.speed,
-                onChange: (e) => onPlaybackOptionsChange({
-                  ...playbackOptions,
-                  speed: parseFloat(e.target.value)
+              hasMultipleTracks && /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                style: { display: "flex", flexDirection: "column" },
+                children: midi.tracks?.map((track, idx) => {
+                  const trackSettings = midi.options.tracks?.[idx];
+                  return /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
+                    className: "checkbox",
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                        type: "checkbox",
+                        checked: trackSettings?.enabled,
+                        onChange: (e) => {
+                          const newTracks = [...midi.options.tracks];
+                          newTracks[idx] = {
+                            ...newTracks[idx],
+                            enabled: e.target.checked
+                          };
+                          onPlaybackOptionsChange({
+                            ...midi.options,
+                            tracks: newTracks
+                          });
+                        }
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                        children: [
+                          "Track ",
+                          idx + 1,
+                          ": ",
+                          track.name,
+                          " - ",
+                          track.notes.length,
+                          " ",
+                          "notes"
+                        ]
+                      }, undefined, true, undefined, this)
+                    ]
+                  }, idx, true, undefined, this);
                 })
-              }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
+                children: [
+                  "Speed:",
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                    type: "number",
+                    step: "0.1",
+                    min: "0.1",
+                    value: midi.options.speed,
+                    onChange: (e) => onPlaybackOptionsChange({
+                      ...midi.options,
+                      speed: parseFloat(e.target.value)
+                    })
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
+                className: "checkbox",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                    type: "checkbox",
+                    checked: midi.options.useG4,
+                    onChange: (e) => onPlaybackOptionsChange({
+                      ...midi.options,
+                      useG4: e.target.checked
+                    })
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                    children: "Printer runs on Duet firmware"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("textarea", {
+                rows: 10,
+                cols: 100,
+                style: { width: "100%", resize: "vertical" },
+                value: midi.getGcode().gcode
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
+                className: "checkbox",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                    type: "checkbox"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
+                    children: "Chunked playback"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
+                children: [
+                  "Playback chunk size (ms):",
+                  /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
+                    type: "number",
+                    step: "100",
+                    min: "100",
+                    max: "10000",
+                    value: playback.chunkIntervalMs ?? 10
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
             ]
           }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-        style: { display: "flex" },
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
-            className: "btn span4",
-            onClick: togglePreview,
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("i", {
-                className: "fas " + (preview.playing ? "fa-pause" : "fa-play")
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
-                children: "Play/Pause Preview"
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
-            className: "btn span4",
-            onClick: skipPreviewToStart,
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("i", {
-                className: "fas fa-step-backward"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
-                children: "Restart Preview"
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
-            className: "btn span4",
-            onClick: togglePlayback,
-            disabled: playback.playing && !playback.chunked,
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("i", {
-                className: "fas " + (playback.playing ? "fa-pause" : "fa-play")
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
-                children: "Play/Pause Playback"
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
-            className: "btn span4",
-            onClick: skipPlaybackToStart,
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("i", {
-                className: "fas fa-step-backward"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
-                children: "Restart Playback"
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("br", {}, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("label", {
-        className: "checkbox",
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("input", {
-            type: "checkbox",
-            checked: playbackOptions.useG4,
-            onChange: (e) => onPlaybackOptionsChange({
-              ...playbackOptions,
-              useG4: e.target.checked
-            })
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
-            children: "Add G4 after M300 (required for Duet)"
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("br", {}, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
-        children: getHumanReadableDuration(midi.getGcode(playbackOptions).durationMs)
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("br", {}, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime.jsxDEV("textarea", {
-        rows: 10,
-        cols: 100,
-        style: { width: "100%", resize: "vertical" },
-        value: midi.getGcode(playbackOptions).gcode
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
 }
 
 // src/index.tsx
