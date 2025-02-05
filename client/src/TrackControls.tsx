@@ -76,7 +76,11 @@ function FilesBrowser({
           >
             {/* TODO: start/stop button here */}
             {preview.track?.fileName || <i>Unnamed File</i>}
-            {/* TODO: time here */}
+            <small className="muted" style={{ marginLeft: "0.5rem" }}>
+              {getHumanReadableDuration(
+                preview.durationMs - preview.progressMs
+              )}
+            </small>
             <button
               className="btn btn-mini"
               title="Cancel preview"
@@ -129,38 +133,42 @@ function FilesBrowser({
                 }}
                 title={i.isPlayable ? undefined : "File not playable"}
               >
-                <button
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    width: "30px",
-                    height: "30px",
-                    margin: 0,
+                {i.isPlayable ? (
+                  <button
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: "30px",
+                      height: "30px",
+                      margin: 0,
 
-                    border: "none",
-                    background: "none",
-                    boxShadow: "none",
+                      border: "none",
+                      background: "none",
+                      boxShadow: "none",
 
-                    outline: "none",
-                  }}
-                  title="Play Preview"
-                  className="btn span4"
-                  disabled={!i.isPlayable}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onTogglePlayback(i.id);
-                  }}
-                >
-                  <i
-                    className={
-                      "fas " +
-                      (preview.playing && preview.track?.id === i.id
-                        ? "fa-pause"
-                        : "fa-play")
-                    }
-                  ></i>
-                </button>
+                      outline: "none",
+                    }}
+                    title="Play Preview"
+                    className="btn span4"
+                    disabled={!i.isPlayable}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTogglePlayback(i.id);
+                    }}
+                  >
+                    <i
+                      className={
+                        "fas " +
+                        (preview.playing && preview.track?.id === i.id
+                          ? "fa-pause"
+                          : "fa-play")
+                      }
+                    ></i>
+                  </button>
+                ) : (
+                  <div style={{ width: "30px" }} />
+                )}
 
                 <div
                   key={i.id}
@@ -298,7 +306,7 @@ export function OctoplayTab() {
   }, []);
 
   // TODO: implement chunked playback
-  const [gcodeChunkMs, setGcodeChunkMs] = useState<number | null>(null);
+  const [gcodeChunkMs, setGcodeChunkMs] = useState<number | null>(5000);
 
   const activeFile = files.find((i) => i.id === activeFileId);
 
@@ -434,12 +442,24 @@ export function OctoplayTab() {
           onRenameEntry={onRenameEntry}
           onDownloadEntry={onDownloadEntry}
           onUpload={onMidiUpload}
-          onCopyGcode={(id) => {
+          onCopyGcode={async (id) => {
             const file = files.find((i) => i.id === id);
 
             if (!file) return;
 
-            navigator.clipboard.writeText(file.getGcode().gcode);
+            const gcode = file.getGcode().gcode;
+
+            try {
+              // navigator.clipboard.writeText only works for https or localhost. since most octoprint apps run on http with .local domains, we need to use the fallback method.
+              await navigator.clipboard.writeText(gcode);
+            } catch (err) {
+              const textArea = document.createElement("textarea");
+              textArea.value = gcode;
+              document.body.appendChild(textArea);
+              textArea.select();
+              document.execCommand("copy");
+              document.body.removeChild(textArea);
+            }
           }}
           onTogglePlayback={(id) => {
             const file = files.find((i) => i.id === id);
@@ -584,7 +604,7 @@ export function TrackControls({
               className={"fas " + (playback.playing ? "fa-pause" : "fa-play")}
             ></i>
           </button>
-          <span>0:01</span>
+          <span>{formatDuration(playback.progressMs)}</span>
           <div
             className="progress progress-text-centered"
             style={{ width: "100%", margin: 0 }}

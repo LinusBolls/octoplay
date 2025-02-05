@@ -33956,6 +33956,11 @@ function FilesBrowser({
             preview.track?.fileName || /* @__PURE__ */ jsx_dev_runtime.jsxDEV("i", {
               children: "Unnamed File"
             }, undefined, false, undefined, this),
+            /* @__PURE__ */ jsx_dev_runtime.jsxDEV("small", {
+              className: "muted",
+              style: { marginLeft: "0.5rem" },
+              children: getHumanReadableDuration(preview.durationMs - preview.progressMs)
+            }, undefined, false, undefined, this),
             /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
               className: "btn btn-mini",
               title: "Cancel preview",
@@ -34005,7 +34010,7 @@ function FilesBrowser({
             },
             title: i.isPlayable ? undefined : "File not playable",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
+              i.isPlayable ? /* @__PURE__ */ jsx_dev_runtime.jsxDEV("button", {
                 style: {
                   display: "flex",
                   alignItems: "center",
@@ -34028,6 +34033,8 @@ function FilesBrowser({
                 children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV("i", {
                   className: "fas " + (preview.playing && preview.track?.id === i.id ? "fa-pause" : "fa-play")
                 }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
+                style: { width: "30px" }
               }, undefined, false, undefined, this),
               /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
                 style: {
@@ -34169,7 +34176,7 @@ function OctoplayTab() {
       setActiveFileId(storedFiles.sort((a, b) => a.fileName.localeCompare(b.fileName)).find((i) => i.isPlayable)?.id ?? null);
     });
   }, []);
-  const [gcodeChunkMs, setGcodeChunkMs] = import_react3.useState(null);
+  const [gcodeChunkMs, setGcodeChunkMs] = import_react3.useState(5000);
   const activeFile = files.find((i) => i.id === activeFileId);
   const [playback, setPlayback] = import_react3.useState({
     playing: false,
@@ -34273,11 +34280,21 @@ function OctoplayTab() {
         onRenameEntry,
         onDownloadEntry,
         onUpload: onMidiUpload,
-        onCopyGcode: (id) => {
+        onCopyGcode: async (id) => {
           const file = files.find((i) => i.id === id);
           if (!file)
             return;
-          navigator.clipboard.writeText(file.getGcode().gcode);
+          const gcode = file.getGcode().gcode;
+          try {
+            await navigator.clipboard.writeText(gcode);
+          } catch (err) {
+            const textArea = document.createElement("textarea");
+            textArea.value = gcode;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand("copy");
+            document.body.removeChild(textArea);
+          }
         },
         onTogglePlayback: (id) => {
           const file = files.find((i) => i.id === id);
@@ -34367,7 +34384,7 @@ function TrackControls({
               }, undefined, false, undefined, this)
             }, undefined, false, undefined, this),
             /* @__PURE__ */ jsx_dev_runtime.jsxDEV("span", {
-              children: "0:01"
+              children: formatDuration(playback.progressMs)
             }, undefined, false, undefined, this),
             /* @__PURE__ */ jsx_dev_runtime.jsxDEV("div", {
               className: "progress progress-text-centered",
